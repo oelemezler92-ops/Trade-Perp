@@ -2,7 +2,8 @@ name: ZEUS All Gate Futures Microstructure
 
 on:
   schedule:
-    - cron: '3/5 * * * *'
+    # 03,08,13,... UTC; deliberately avoid minute 00
+    - cron: '3-59/5 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -62,6 +63,10 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Serialize only Git-publishing jobs, not the 16 API collectors.
+    concurrency:
+      group: zeus-gate-publish-main
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -86,5 +91,17 @@ jobs:
           git add -A data/
           if ! git diff --cached --quiet; then
             git commit -m "data: refresh ZEUS full-market microstructure [skip ci]"
-            git push
+            for attempt in 1 2 3 4 5; do
+              if git pull --rebase && git push; then
+                exit 0
+              fi
+              if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+                git rebase --abort || true
+              fi
+              echo "Git publish attempt $attempt failed" >&2
+              sleep $((attempt * 2))
+            done
+            echo "::error::ZEUS full-market Git publish failed after retries"
+            exit 1
           fi
+          
