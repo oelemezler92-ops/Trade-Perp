@@ -203,7 +203,7 @@ def trade_to_delta(t: dict, multiplier: Decimal) -> tuple[int, Decimal, Decimal]
     return trade_timestamp_ms(t), base_delta, base_delta * price
 
 
-def get_trades(contract: str, start_ms: int, end_ms: int) -> tuple[list[dict], dict]:
+def _get_trades_window(contract: str, start_ms: int, end_ms: int) -> tuple[list[dict], dict]:
     """Public Gate futures trades endpoint, offset-paginated within a time range."""
     result: list[dict] = []
     offset = 0
@@ -225,6 +225,55 @@ def get_trades(contract: str, start_ms: int, end_ms: int) -> tuple[list[dict], d
     # Pagination must be complete: otherwise CVD derived from this partial window
     # would be dangerously misleading.
     return result, {"pages": pages, "page_cap_reached": not exhausted, "records": len(result), "complete_pagination": exhausted}
+
+
+
+def get_trades(contract: str, start_ms: int, end_ms: int) -> tuple[list[dict], dict]:
+    """Split BTC time ranges and reject any incomplete trade data."""
+    if contract != "BTC_USDT":
+        return _get_trades_window(contract, start_ms, end_ms)
+
+    trades = {}
+    total_pages = 0
+    intervals = 0
+    splits = 0
+
+    def fetch(left: int, right: int) -> None:
+        nonlocal total_pages, splits
+        batch, meta = _get_trades_window(contract, left, right)
+        total_pages += meta["pages"]
+        if not meta["complete_pagination"]:
+            if right - left <= 2000:
+                raise RuntimeError("BTC trade range saturated even at 2 seconds; CVD not published")
+            mid = (left + right) // 2
+            splits += 1
+            fetch(left, mid)
+            fetch(mid, right)
+            return
+        for t in batch:
+            tid = str(t.get("id", ""))
+            if not tid:
+                raise ValueError("BTC trade without ID; cannot deduplicate")
+            trades[tid] = t
+
+    cursor = start_ms
+    while cursor < end_ms:
+        stop = min(cursor + 60000, end_ms)
+        fetch(cursor, stop)
+        intervals += 1
+        cursor = stop
+    if not intervals:
+        fetch(start_ms, end_ms)
+        intervals = 1
+
+    return list(trades.values()), {
+        "pages": total_pages,
+        "page_cap_reached": False,
+        "complete_pagination": True,
+        "records": len(trades),
+        "time_slices": intervals,
+        "adaptive_splits": splits,
+    }
 
 
 def cvd_bars(trades: list[dict], multiplier: Decimal, cutoff_ms: int) -> list[dict]:
@@ -253,7 +302,7 @@ def collect_cvd(symbol: str, gate: str, info: dict, at: int) -> dict:
     prior = state.get("bars", [])
     # Fetch with 10s overlap; robust against inclusive timestamps, using exact trade IDs.
     last_observed = int(state.get("last_trade_ms", 0))
-    from_ms = (max(0, last_observed - 10_000) if last_observed else at - 6 * 60_000)
+    from_ms = (max(at - 6 * 60_000, last_observed - 10_000) if last_observed else at - 6 * 60_000)
     raw, pagination = get_trades(gate, from_ms, at)
     last_ids = set(str(x) for x in state.get("recent_trade_ids", []))
     fresh: list[dict] = []
@@ -271,7 +320,7 @@ def collect_cvd(symbol: str, gate: str, info: dict, at: int) -> dict:
         raise RuntimeError(f"Trade pagination capped for {gate}: {pagination['records']} records; no trustworthy CVD update")
     # A period beyond the exchange's lookback cannot be reconstructed from
     # paginated recent trades; explicitly reset the series when that happens.
-    gap_before_fetch = bool(last_observed and last_observed < at - WINDOW_MS)
+    gap_before_fetch = bool(last_observed and from_ms > last_observed)
     current = {} if gap_before_fetch else {int(b["minute_ms"]): dict(b) for b in prior if int(b["minute_ms"]) >= cutoff}
     for b in cvd_bars(fresh, info["multiplier"], cutoff):
         minute = b["minute_ms"]
