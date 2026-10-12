@@ -1,0 +1,1 @@
+{"coverage_windows":[{"end_ms":1791813614876,"error":null,"events":0,"ok":true,"start_ms":1791813584278}],"events":[],"limitations":"Only publicly published 1s liquidation snapshots during observed windows. Missed periods are unknown; this is NOT predicted liquidation clusters or a liquidation heatmap.","source":"binance_usdm_all_force_orders_snapshots"}
