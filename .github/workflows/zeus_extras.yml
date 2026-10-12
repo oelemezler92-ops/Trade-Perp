@@ -3,7 +3,8 @@ name: ZEUS Public Liquidations and Scenarios
 on:
   workflow_dispatch:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    # 04,09,14,... UTC, one minute after full-market schedule
+    - cron: '4-59/5 * * * *'
 
 permissions:
   contents: write
@@ -16,6 +17,10 @@ jobs:
   enrich:
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    # Avoid simultaneous publishing of LIQ/SCE and full-market data.
+    concurrency:
+      group: zeus-gate-publish-main
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,6 +38,17 @@ jobs:
           git add -A data/extras/
           if ! git diff --cached --quiet; then
             git commit -m 'data: refresh public liquidations and ZEUS scenarios [skip ci]'
-            git pull --rebase
-            git push
+            for attempt in 1 2 3 4 5; do
+              if git pull --rebase && git push; then
+                exit 0
+              fi
+              if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then
+                git rebase --abort || true
+              fi
+              echo "Git publish attempt $attempt failed" >&2
+              sleep $((attempt * 2))
+            done
+            echo "::error::ZEUS LIQ/SCE Git publish failed after retries"
+            exit 1
           fi
+          
