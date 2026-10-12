@@ -34,7 +34,7 @@ jobs:
           ZEUS_LIQUIDATION_CAPTURE_SECONDS: '30'
         run: python collector.py
       - name: Persist compact, machine-readable ZEUS feed
-              if: always()
+        if: always()
         run: |
           git config user.name 'zeus-market-data-bot'
           git config user.email 'zeus-market-data-bot@users.noreply.github.com'
