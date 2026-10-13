@@ -23,8 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -48,7 +50,7 @@ jobs:
         if: always()
         run: |
           mkdir -p shard-output
-          git add -A data/
+          git add -A -- data/ ':(exclude)data/extras/**'
           git diff --cached --name-only -z --diff-filter=ACM | while IFS= read -r -d '' file; do
             mkdir -p "shard-output/$(dirname "$file")"
             cp "$file" "shard-output/$file"
@@ -72,8 +74,10 @@ jobs:
     concurrency:
       group: zeus-gate-publish-main
       cancel-in-progress: false
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -101,7 +105,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --mixed origin/main
-            git add -A data/
+            git add -A -- data/ ':(exclude)data/extras/**'
 
             if git diff --cached --quiet; then
               echo "No data changes to publish"
