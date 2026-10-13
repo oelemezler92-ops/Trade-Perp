@@ -3,8 +3,8 @@ name: ZEUS All Gate Futures Microstructure
 
 on:
   schedule:
-    # 03,08,13,... UTC; deliberately avoid minute 00
-    - cron: '3-59/5 * * * *'
+    # Every 5 minutes UTC; GitHub may delay or skip scheduled runs
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -121,4 +121,3 @@ jobs:
 
           echo "::error::ZEUS publish failed after retries"
           exit 1
-          
